@@ -1,0 +1,5 @@
+model:
+  params:
+    network_config:
+      params:
+        query_emb_scale: 0.5

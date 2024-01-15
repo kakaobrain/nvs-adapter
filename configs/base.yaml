@@ -1,0 +1,242 @@
+model:
+  base_learning_rate: 5.0e-5
+  target: sgm.models.nvsadapter.NVSAdapterDiffusionEngine
+  params:
+    scale_factor: 0.18215
+    disable_first_stage_autocast: True
+    
+    network_wrapper: sgm.modules.nvsadapter.wrappers.NVSAdapterWrapper
+
+    # denoiser configuration (the same as in the )
+    denoiser_config:
+      target: sgm.modules.nvsadapter.wrappers.NVSAdapterDiscreteDenoiser
+      params:
+        num_idx: 1000
+
+        weighting_config:
+          target: sgm.modules.diffusionmodules.denoiser_weighting.EpsWeighting
+        scaling_config:
+          target: sgm.modules.diffusionmodules.denoiser_scaling.EpsScaling
+        discretization_config:
+          target: sgm.modules.diffusionmodules.discretizer.LegacyDDPMDiscretization
+
+    # EDM sampler config for fast sampling
+    sampler_config:
+      target: sgm.modules.nvsadapter.wrappers.NVSAdapterEulerEDMSampler
+      params:
+        num_steps: 50
+
+        discretization_config:
+          target: sgm.modules.diffusionmodules.discretizer.LegacyDDPMDiscretization
+
+        guider_config: 
+          target: sgm.modules.nvsadapter.wrappers.NVSAdapterCFG
+          params:
+            scale: 3.0
+
+    network_config:
+      target: sgm.modules.nvsadapter.threedim.ThreeDiMAdapter
+      params:
+        # pre-trained SD configuration 
+        sd_config:
+          target: sgm.modules.diffusionmodules.openaimodel.UNetModel
+          params:
+            use_checkpoint: False # frozen model does not require checkpoint
+            use_fp16: True
+            in_channels: 4
+            out_channels: 4
+            model_channels: 320
+            attention_resolutions: [4, 2, 1]
+            num_res_blocks: 2
+            channel_mult: [1, 2, 4, 4]
+            num_head_channels: 64
+            use_spatial_transformer: True
+            use_linear_in_transformer: True
+            transformer_depth: 1
+            context_dim: 1024
+            legacy: False
+
+        cond_drop_config:
+          target: sgm.modules.nvsadapter.threedim.ThreeDiMCondDrop
+          params:
+            ucg_rate: 0.1
+
+        image_attn_mode: query_only
+        view_attn_mode: support_sattn_mq
+        query_composer_mode: learnable_emb
+        imgemb_to_text: false
+        num_support: 1
+        num_query: 4
+        image_context_dim: 1024
+        posemb_dim: 144
+        attn_out_zero_init: True
+        use_checkpoint : False # if true, use checkpointing for learnable params
+        max_timesteps: 1000
+
+    # pre-trained image encoder & latent decoder (VAE)
+    first_stage_config:
+      target: sgm.models.autoencoder.AutoencoderKLInferenceWrapper
+      params:
+        embed_dim: 4
+        monitor: val/rec_loss
+        ddconfig:
+          double_z: true
+          z_channels: 4
+          resolution: 256
+          in_channels: 3
+          out_ch: 3
+          ch: 128
+          ch_mult: [1, 2, 4, 4]
+          num_res_blocks: 2
+          attn_resolutions: []
+          dropout: 0.0
+        lossconfig:
+          target: torch.nn.Identity
+
+    conditioner_config:
+      target: sgm.modules.nvsadapter.conditioner.MultipleGeneralConditioners
+      params: 
+        conditioners_config:
+          - name: support_latents
+            target: sgm.modules.GeneralConditioner
+            params:
+              emb_models:
+                - is_trainable: False
+                  input_key: support_latents
+                  target: sgm.modules.encoders.modules.IdentityEncoder
+                  params: {}
+
+          - name: ray
+            target: sgm.modules.GeneralConditioner
+            params:
+              emb_models:
+                # ray embedding
+                - is_trainable: False
+                  input_keys: 
+                    - support_rays_offset
+                    - support_rays_direction
+                    - query_rays_offset
+                    - query_rays_direction
+                  target: sgm.modules.nvsadapter.conditioner.RayPosConditionEmbedder
+                  params:
+                    offset_deg: [0, 15]
+                    direction_deg: [0, 8]
+                    use_plucker: true
+
+          - name: txt
+            target: sgm.modules.GeneralConditioner
+            params:
+              emb_models:
+                # text embedding
+                - is_trainable: False
+                  input_key: txt
+                  target: sgm.modules.encoders.modules.FrozenOpenCLIPEmbedder
+                  params:
+                    freeze: true
+                    layer: penultimate
+                    
+          - name: image
+            target: sgm.modules.GeneralConditioner
+            params:
+              emb_models:
+                # image embedding
+                - is_trainable: False
+                  input_key: support_rgbs
+                  target: sgm.modules.encoders.modules.FrozenOpenCLIPImageEmbedder
+                  params:
+                    unsqueeze_dim: true
+                    
+    loss_fn_config:
+      target: sgm.modules.diffusionmodules.loss.StandardDiffusionLoss
+      params:
+        sigma_sampler_config:
+          target: sgm.modules.diffusionmodules.sigma_sampling.DiscreteSampling
+          params:
+            num_idx: 1000
+
+            discretization_config:
+              target: sgm.modules.diffusionmodules.discretizer.LegacyDDPMDiscretization
+
+    use_ema: True
+    ema_decay_rate: 0.9995
+
+    # using the constant scheduler
+    scheduler_config:
+      target: sgm.lr_scheduler.LambdaLinearScheduler
+      params:
+        warm_up_steps: [ 10000 ]
+        cycle_lengths: [ 10000000000000 ]
+        f_start: [ 1.e-6 ]
+        f_max: [ 1. ]
+        f_min: [ 1. ]
+
+    # path to the pre-trained SD model checkpoint
+    sd_ckpt_path: checkpoints/v2-1_512-ema-pruned.safetensors
+
+
+data:
+  target: sgm.data.objaverse.ObjaverseDataLoader
+  params:
+
+    train_config:
+      # path to data
+      urls: "/data/objaverse/objaverse_renderings/objaverse_rendering_train_{000000..001687}.tar"
+      length: 790152
+      total_views: 12
+      num_support_views: 1
+      num_query_views: 4
+      use_relative: true
+      deterministic: false
+      resolution: 256
+
+    val_config:
+      # path to data
+      urls: "/data/objaverse/objaverse_renderings/objaverse_rendering_valid_{000000..000017}.tar"
+      length: 7982
+      total_views: 12
+      num_support_views: 1
+      num_query_views: 4
+      use_relative: true
+      deterministic: true
+      resolution: 256
+
+    test_config: null
+
+    batch_size: 32
+    num_workers: 6
+
+
+lightning:
+  modelcheckpoint:
+    params:
+      every_n_train_steps: 10000
+      filename: "{step:06}-{epoch:06}"
+      save_top_k: -1  # -1 (keep all ckpts) or nonnegative integer (keep last k ckpts)
+
+  callbacks:
+    metrics_over_trainsteps_checkpoint:
+      params:
+        every_n_train_steps: 20000
+
+    image_logger:
+      target: main.ImageLogger
+      params:
+        disabled: False
+        enable_autocast: False
+        batch_frequency: 1000
+        max_images: 8
+        increase_log_steps: True
+        log_first_step: False
+        log_images_kwargs:
+          use_ema_scope: False
+          N: 8
+          n_rows: 1
+
+  trainer:
+    devices: 0,1,2,3,4,5,6,7
+    precision: 16-mixed
+    benchmark: True
+    num_sanity_val_steps: 0
+    accumulate_grad_batches: 1
+    max_epochs: 1000
+    gradient_clip_val: 0.5

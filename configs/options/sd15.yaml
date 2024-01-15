@@ -1,0 +1,75 @@
+model:
+  params:
+    network_config:
+      params:
+        # pre-trained SD configuration 
+        sd_config:
+          target: sgm.modules.diffusionmodules.openaimodel.UNetModel
+          params:
+            use_checkpoint: False
+            in_channels: 4
+            out_channels: 4
+            model_channels: 320
+            attention_resolutions: [ 4, 2, 1 ]
+            num_res_blocks: 2
+            channel_mult: [ 1, 2, 4, 4 ]
+            num_heads: 8
+            num_head_channels: -1
+            use_linear_in_transformer: False 
+            use_spatial_transformer: True
+            transformer_depth: 1
+            context_dim: 768
+            legacy: False
+
+    conditioner_config:
+      target: sgm.modules.nvsadapter.conditioner.MultipleGeneralConditioners
+      params: 
+        conditioners_config:
+          - name: support_latents
+            target: sgm.modules.GeneralConditioner
+            params:
+              emb_models:
+                - is_trainable: False
+                  input_key: support_latents
+                  target: sgm.modules.encoders.modules.IdentityEncoder
+                  params: {}
+
+          - name: ray
+            target: sgm.modules.GeneralConditioner
+            params:
+              emb_models:
+                # ray embedding
+                - is_trainable: False
+                  input_keys: 
+                    - support_rays_offset
+                    - support_rays_direction
+                    - query_rays_offset
+                    - query_rays_direction
+                  target: sgm.modules.nvsadapter.conditioner.RayPosConditionEmbedder
+                  params:
+                    offset_deg: [0, 15]
+                    direction_deg: [0, 8]
+                    use_plucker: true
+
+          - name: txt
+            target: sgm.modules.GeneralConditioner
+            params:
+              emb_models:
+                # text embedding
+                - is_trainable: False
+                  input_key: txt
+                  target: sgm.modules.encoders.modules.FrozenCLIPEmbedder
+                    
+          - name: image
+            target: sgm.modules.GeneralConditioner
+            params:
+              emb_models:
+                # image embedding
+                - is_trainable: False
+                  input_key: support_rgbs
+                  target: sgm.modules.encoders.modules.FrozenOpenCLIPImageEmbedder
+                  params:
+                    unsqueeze_dim: true
+                    
+    # path to the pre-trained SD model checkpoint
+    sd_ckpt_path: checkpoints/v1-5-pruned-emaonly.ckpt

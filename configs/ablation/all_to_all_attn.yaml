@@ -1,0 +1,6 @@
+model:
+  params:
+    network_config:
+      params:
+        view_attn_mode: support_sattn_mq
+        query_composer_mode: all_to_all

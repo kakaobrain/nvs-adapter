@@ -1,0 +1,3 @@
+[submodule "thirdparty/carvekit"]
+	path = thirdparty/carvekit
+	url = https://github.com/OPHoperHPO/image-background-remove-tool.git

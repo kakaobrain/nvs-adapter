@@ -1,0 +1,3 @@
+model:
+  params:
+    lr_mult_for_pretrained: 0.1

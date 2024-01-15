@@ -1,0 +1,12 @@
+data:
+  params:
+    train_config:
+      num_query_views: 2
+    val_config:
+      num_query_views: 2
+
+model:
+  params:
+    network_config:
+      params:
+        num_query: 2

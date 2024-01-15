@@ -1,0 +1,55 @@
+model:
+  params:
+    network_config:
+      params:
+        posemb_dim: 496
+
+    conditioner_config:
+      target: sgm.modules.nvsadapter.conditioner.MultipleGeneralConditioners
+      params: 
+        conditioners_config:
+          - name: support_latents
+            target: sgm.modules.GeneralConditioner
+            params:
+              emb_models:
+                - is_trainable: False
+                  input_key: support_latents
+                  target: sgm.modules.encoders.modules.IdentityEncoder
+                  params: {}
+
+          - name: ray
+            target: sgm.modules.GeneralConditioner
+            params:
+              emb_models:
+                # ray embedding
+                - is_trainable: False
+                  input_keys: 
+                    - support_c2ws
+                    - query_c2ws
+                    - support_latents
+                  target: sgm.modules.nvsadapter.conditioner.ExtrinsicEmbedder
+                  params:
+                    deg: [0, 15]
+
+          - name: image
+            target: sgm.modules.GeneralConditioner
+            params:
+              emb_models:
+                # image embedding
+                - is_trainable: True
+                  input_key: support_rgbs
+                  target: sgm.modules.nvsadapter.conditioner.ImageEmbedAttentionProjector
+                  params:
+                    unsqueeze_dim: true
+
+          - name: txt
+            target: sgm.modules.GeneralConditioner
+            params:
+              emb_models:
+                # text embedding
+                - is_trainable: False
+                  input_key: txt
+                  target: sgm.modules.encoders.modules.FrozenOpenCLIPEmbedder
+                  params:
+                    freeze: true
+                    layer: penultimate
